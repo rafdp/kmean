@@ -1,12 +1,12 @@
-#include "DatasetGeneration.h"
+#include "kmean.h"
 
 
 int main( int argc, char** argv) 
 {
-    const int Npoints = 1000;
+    const int Npoints = 100;
     const int Nclusters = 5;
     const int dimension = 2;
-    thrust::device_vector<int> dataLabels (Npoints * Nclusters, 0);
+/*    thrust::device_vector<int> dataLabels (Npoints * Nclusters, 0);
     thrust::device_vector<float> dataD (Npoints * Nclusters * dimension, 0.0f);
     GenerateDatasetGaussian (Npoints, 
                              Nclusters, 
@@ -26,7 +26,11 @@ int main( int argc, char** argv)
         fprintf (f, "%d \n", labelsH [i]);
     }
 
-    fclose (f);
+    fclose (f);*/
+    printf ("Hello there\n");
+    kmean proc (Nclusters, Npoints, Nclusters, dimension);
+    printf ("General Kenoby\n");
+    proc.Process ();
 
     return 0;
 }

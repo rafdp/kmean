@@ -37,15 +37,15 @@ void GenerateSingleCluster (curandState* states,
                             float* mean,  
                             const float dev, 
                             const int Npoints,  
-                            float* data)
+                            float* data,
+			    bool* initSetting)
 {
-    static bool setupDone = false;
     const int kernelsPerBlock = 512;
     const int blocks = Npoints*dimension/kernelsPerBlock + 1;
-    if (!setupDone)
+    if (!(*initSetting))
     {
         setup_kernel <<<blocks, kernelsPerBlock>>> (states, time(NULL), Npoints*dimension);
-        setupDone = true;
+        *initSetting = true;
     }
     generate <<<blocks, kernelsPerBlock>>> (states, data, mean, dev, Npoints*dimension, dimension);
 }
@@ -64,7 +64,7 @@ void GenerateDatasetGaussian (const int Npoints,
     CC(cudaMalloc (&states, Npoints*dimension*sizeof (curandState)));
 
     const float dev = (stddev < 0.001f) ? 0.2f/Nclusters : stddev;
-
+    bool initSetting = false;
     for (int cluster = 0; cluster < Nclusters; cluster++)
     { 
         thrust::host_vector<float> mean (dimension, 0.0f);
@@ -74,7 +74,8 @@ void GenerateDatasetGaussian (const int Npoints,
         GenerateSingleCluster (states, dimension, 
                                meanD.data().get(), 
                                dev, Npoints, 
-                               data + cluster*Npoints*dimension);
+                               data + cluster*Npoints*dimension,
+			       &initSetting);
     }
     setLabels <<<Nclusters, Npoints>>> (labels);
     if (shuffle)
@@ -117,7 +118,7 @@ void GenerateDatasetGaussian (const int Npoints,
                            cudaMemcpyHostToDevice));
         }
     }
-    cudaFree (states);
+    CC(cudaFree (states));
 }
 
 

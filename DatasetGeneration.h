@@ -5,7 +5,8 @@ void GenerateSingleCluster (curandState* states,
                             float* mean,  
                             const float dev, 
                             const int Npoints,  
-                            float* data);
+                            float* data,
+			    bool* initSetting);
 
 void GenerateDatasetGaussian (const int Npoints, 
                               const int Nclusters, 
