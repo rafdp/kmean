@@ -1,20 +1,23 @@
 
 #include "kmean.h"
 
-kmean::kmean (const int K_,
+kmean::kmean (const int seed_,
+	      const int K_,
 	      const int Npoints_,
 	      const int Nclusters_,
 	      const int dimension_) : 
+    seed           (seed_),
     K              (K_),
     Npoints        (Npoints_),
     Nclusters      (Nclusters_),
     dimension      (dimension_),
     dataD          (Npoints*Nclusters*dimension, 0.0f),
-    initialLabelsD (Npoints*Nclusters, 0),
+    initialLabelsD (Npoints*Nclusters),
     centroidsD     (K*dimension),
-    labelsD        (Npoints*Nclusters)
+    labelsD        (Npoints*Nclusters, -1)
 {
-    GenerateDatasetGaussian (Npoints, 
+    GenerateDatasetGaussian (seed, 
+		             Npoints, 
 		             Nclusters,
 			     dimension,
 			     dataD.data().get(),
@@ -22,6 +25,7 @@ kmean::kmean (const int K_,
 			     true);
 
 }
+kmean::~kmean () {}
 
 void kmean::Write (std::string filenamePoints, std::string filenameCentroids)
 { 
@@ -61,6 +65,7 @@ void kmean::CentroidInitialization ()
     bool singleClusterInitSetting = false;
     thrust::device_vector<float> centroidsInit (K*dimension, 0.5f);
     GenerateSingleCluster (states, 
+		           seed,
 		           dimension,
 			   centroidsInit.data().get (),
 			   0.5f/3.0f,
@@ -83,16 +88,61 @@ void kmean::Iteration ()
 		      pointCounter,
 		      pointCounter + Npoints*Nclusters,
 		      laf);
+
+    typedef IteratorSizeHelper* CustomPtr;
+    
+    thrust::device_vector<float> d_centroidsD (centroidsD);
+    CustomPtr dataCustomPtr = reinterpret_cast<CustomPtr> (dataD.data().get());
+    CustomPtr centroidsCustomPtr = reinterpret_cast<CustomPtr> (centroidsD.data().get());
+    CustomPtr d_centroidsCustomPtr = reinterpret_cast<CustomPtr> (d_centroidsD.data().get());
+
+    thrust::sort_by_key (thrust::device,
+		         labelsD.begin(),
+			 labelsD.end(),
+			 dataCustomPtr);
+
+    thrust::device_vector<int> keyDump (K, 0);
+    thrust::reduce_by_key (thrust::device,
+		           labelsD.begin(),
+			   labelsD.end(),
+			   dataCustomPtr,
+			   keyDump.begin(),
+			   d_centroidsCustomPtr,
+			   thrust::equal_to<int> (),
+			   thrust::plus<IteratorSizeHelper> ());
+    int* keyDumpPtr = keyDump.data().get();
+    thrust::device_vector<int> clusterSizes (keyDump);
+    thrust::upper_bound (thrust::device,
+		         labelsD.begin(),
+			 labelsD.end(),
+			 keyDump.begin(),
+			 keyDump.end(),
+			 clusterSizes.begin());
+    thrust::adjacent_difference (thrust::device,
+		                 clusterSizes.begin(),
+				 clusterSizes.end(),
+				 clusterSizes.begin());
+    
+    CentroidDividerFunctor cdf (d_centroidsD.data().get(),
+		                clusterSizes.data().get(),
+				dimension);
+    thrust::for_each (pointCounter,
+		      pointCounter + K,
+		      cdf);
+    thrust::for_each (thrust::device,
+		      pointCounter,
+		      pointCounter + K,
+		      [centroidsCustomPtr, keyDumpPtr, d_centroidsCustomPtr]__device__ (int idx) 
+		      {if (keyDumpPtr[idx] >= idx) centroidsCustomPtr[keyDumpPtr[idx]] = 
+		       d_centroidsCustomPtr[idx];});
 }
 
-void kmean::Process ()
+void kmean::Process (const int max_iter)
 {
-    printf ("About to call centroid initialization\n");
     CentroidInitialization();
-    printf ("About to call iteration\n");
-    Iteration ();
-    printf ("About to write\n");
-    Write ("test_data.txt", "test_centroids.txt");
+    for (int i = 0; i < max_iter; i++) Iteration ();
+    //printf ("About to write\n");
+    //Write ("test_data.txt", "test_centroids.txt");
 }
 
 __device__
@@ -156,5 +206,43 @@ CentroidPointData DistancePointToCentroidFunctor::operator () (int centroidIndex
     return cpd;
 }
 
+__device__
+IteratorSizeHelper IteratorSizeHelper::operator+ (const IteratorSizeHelper b) const
+{
+    IteratorSizeHelper res = {};
+    for (int d = 0; d < KMEAN_DIMENSION_DEFINED; d++)
+    {
+        res.data[d] = data[d] + b.data[d];
+    }
+    return res;
+}
+__device__
+IteratorSizeHelper& IteratorSizeHelper::operator= (IteratorSizeHelper b) 
+{
+    for (int d = 0; d < KMEAN_DIMENSION_DEFINED; d++)
+    {
+        data[d] = b.data[d];
+    }
+    return *this;
+}
 
 
+__host__ 
+CentroidDividerFunctor::CentroidDividerFunctor (float* centroidsD_,
+                        int* keySizesD_,
+	                const int dimension_) : 
+    centroidsD (centroidsD_),
+    keySizesD  (keySizesD_),
+    dimension (dimension_)
+{}
+
+__device__
+void CentroidDividerFunctor::operator () (int index)
+{
+    if (!keySizesD[index]) return;
+    for (int d = 0; d < dimension; d++)
+    {
+        centroidsD[index*dimension + d] /= keySizesD[index];
+    }
+
+}

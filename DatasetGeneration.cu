@@ -32,7 +32,8 @@ static __global__ void setLabels (int* labels)
 }
 
 
-void GenerateSingleCluster (curandState* states, 
+void GenerateSingleCluster (curandState* states,
+	                    const int seed,	
                             const int dimension, 
                             float* mean,  
                             const float dev, 
@@ -44,14 +45,15 @@ void GenerateSingleCluster (curandState* states,
     const int blocks = Npoints*dimension/kernelsPerBlock + 1;
     if (!(*initSetting))
     {
-        setup_kernel <<<blocks, kernelsPerBlock>>> (states, time(NULL), Npoints*dimension);
+        setup_kernel <<<blocks, kernelsPerBlock>>> (states, seed, Npoints*dimension);
         *initSetting = true;
     }
     generate <<<blocks, kernelsPerBlock>>> (states, data, mean, dev, Npoints*dimension, dimension);
 }
 
 
-void GenerateDatasetGaussian (const int Npoints, 
+void GenerateDatasetGaussian (const int seed,
+		              const int Npoints, 
                               const int Nclusters, 
                               const int dimension, 
                               float* data, 
@@ -59,7 +61,7 @@ void GenerateDatasetGaussian (const int Npoints,
                               bool shuffle,
                               const float stddev)
 {
-    srand (time(NULL));
+    srand (seed);
     curandState* states = nullptr;
     CC(cudaMalloc (&states, Npoints*dimension*sizeof (curandState)));
 
@@ -71,7 +73,9 @@ void GenerateDatasetGaussian (const int Npoints,
         for (int d = 0; d < dimension; d++)
             mean[d] = ((rand()*1.0f) /RAND_MAX) * (1-6*dev) + 3*dev;
         thrust::device_vector<float> meanD (mean);
-        GenerateSingleCluster (states, dimension, 
+        GenerateSingleCluster (states, 
+			       seed,
+			       dimension, 
                                meanD.data().get(), 
                                dev, Npoints, 
                                data + cluster*Npoints*dimension,

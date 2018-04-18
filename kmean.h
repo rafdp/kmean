@@ -1,8 +1,11 @@
 
 #include "DatasetGeneration.h"
-
+#ifndef KMEAN_DIMENSION_DEFINED 
+#error "kmean dimension must be defined"
+#endif
 class kmean 
 {
+    const int seed;
     const int K;
     const int Npoints;
     const int Nclusters;
@@ -13,16 +16,17 @@ class kmean
 
     thrust::device_vector<float> centroidsD;
     thrust::device_vector<int> labelsD;
-
+public:
     void Iteration ();
     void CentroidInitialization ();
-public:
-    kmean (const int K,
+//public:
+    kmean (const int seed,
+	   const int K,
            const int Npoints,
 	   const int Nclusters,
 	   const int dimension);
-
-    void Process ();
+    ~kmean ();
+    void Process (const int max_iter);
 
     void Write (std::string filenamePoints, std::string filenameCentroids);
   
@@ -54,8 +58,6 @@ struct LabelAssignmentFunctor
     void operator () (int pointIndex);
 };
 
-
-
 struct DistancePointToCentroidFunctor
 {
     float* pointD;
@@ -70,5 +72,26 @@ struct DistancePointToCentroidFunctor
 
 };
 
+struct IteratorSizeHelper
+{
+    float data[KMEAN_DIMENSION_DEFINED];
+    __device__
+    IteratorSizeHelper operator+ (const IteratorSizeHelper b) const;
+    __device__
+    IteratorSizeHelper& operator= (IteratorSizeHelper b);
+};
 
+struct CentroidDividerFunctor
+{
+    float* centroidsD;
+    int* keySizesD;
+    const int dimension;
 
+    __host__ 
+    CentroidDividerFunctor (float* centroidsD_,
+		            int* keySizesD_,
+			    const int dimension_);
+
+    __device__
+    void operator () (int index);
+};

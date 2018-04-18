@@ -2,7 +2,7 @@
 .DEFAULT_GOAL := main
 
 CU = nvcc
-CUFLAGS = -Wno-deprecated-gpu-targets -std=c++11 
+CUFLAGS = -Wno-deprecated-gpu-targets -std=c++11 --expt-extended-lambda 
 
 main: DatasetGeneration.o main.o HelperFunctions.o kmean.o
 	$(CU) $(CUFLAGS) -o $@ $^ -lcuda
@@ -28,9 +28,9 @@ r: main
 c: 
 	rm -rf main *.o
 
-rc: main
-	make c
-	make r
+test: main
+	./main 1000 100 20
 	gnuplot plot.p
+	./giffer.sh
 
 
