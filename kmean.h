@@ -15,7 +15,11 @@ class kmean
     thrust::device_vector<int> initialLabelsD;
 
     thrust::device_vector<float> centroidsD;
+    thrust::device_vector<float> centroidVariancesD;
+
     thrust::device_vector<int> labelsD;
+
+    int iteration;
 public:
     void Iteration ();
     void CentroidInitialization ();
@@ -29,7 +33,6 @@ public:
     void Process (const int max_iter);
 
     void Write (std::string filenamePoints, std::string filenameCentroids);
-  
 };
 
 struct CentroidPointData
@@ -58,6 +61,7 @@ struct LabelAssignmentFunctor
     void operator () (int pointIndex);
 };
 
+
 struct DistancePointToCentroidFunctor
 {
     float* pointD;
@@ -79,6 +83,10 @@ struct IteratorSizeHelper
     IteratorSizeHelper operator+ (const IteratorSizeHelper b) const;
     __device__
     IteratorSizeHelper& operator= (IteratorSizeHelper b);
+    __device__
+    IteratorSizeHelper operator- (const IteratorSizeHelper b) const;
+    __device__
+    float NormSq () const;
 };
 
 struct CentroidDividerFunctor
@@ -94,4 +102,35 @@ struct CentroidDividerFunctor
 
     __device__
     void operator () (int index);
+};
+struct SquaredNormFunctor
+{
+    float* dataD;
+    float* centroidD;
+    const int dimension;
+    __device__
+    SquaredNormFunctor (float* dataD_,
+		       float* centroidD_,
+		       const int dimension_);
+    __device__
+    float operator () (int pointIdx);
+};
+struct VarianceCalculatorFunctor
+{
+    float* dataD;
+    float* centroidsD;
+    float* centroidVariancesD;
+    int* centroidMappingD;
+    int* cumulativeCentroidSizesD;
+    const int dimension;
+    VarianceCalculatorFunctor (float* dataD_,
+                               float* centroidsD_,
+        		       float* centroidVariancesD_,
+			       int* centroidMapping_,
+			       int* cumulativeCentroidSizesD_,
+			       const int dimension_);
+
+    __device__
+    void operator () (int centroidIndex);
+
 };

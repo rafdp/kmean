@@ -8,7 +8,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/binary_search.h>
 #include <thrust/functional.h>
-
+#include <thrust/extrema.h>
 #define CC(ans) { GPUAssert((ans), __FILE__, __LINE__); }
 
 

@@ -6,15 +6,17 @@ kmean::kmean (const int seed_,
 	      const int Npoints_,
 	      const int Nclusters_,
 	      const int dimension_) : 
-    seed           (seed_),
-    K              (K_),
-    Npoints        (Npoints_),
-    Nclusters      (Nclusters_),
-    dimension      (dimension_),
-    dataD          (Npoints*Nclusters*dimension, 0.0f),
-    initialLabelsD (Npoints*Nclusters),
-    centroidsD     (K*dimension),
-    labelsD        (Npoints*Nclusters, -1)
+    seed               (seed_),
+    K                  (K_),
+    Npoints            (Npoints_),
+    Nclusters          (Nclusters_),
+    dimension          (dimension_),
+    dataD              (Npoints*Nclusters*dimension, 0.0f),
+    initialLabelsD     (Npoints*Nclusters),
+    centroidsD         (K*dimension),
+    centroidVariancesD (K),
+    labelsD            (Npoints*Nclusters, -1),
+    iteration          ()
 {
     GenerateDatasetGaussian (seed, 
 		             Npoints, 
@@ -102,15 +104,16 @@ void kmean::Iteration ()
 			 dataCustomPtr);
 
     thrust::device_vector<int> keyDump (K, 0);
-    thrust::reduce_by_key (thrust::device,
-		           labelsD.begin(),
-			   labelsD.end(),
-			   dataCustomPtr,
-			   keyDump.begin(),
-			   d_centroidsCustomPtr,
-			   thrust::equal_to<int> (),
-			   thrust::plus<IteratorSizeHelper> ());
+    auto ends_pair = thrust::reduce_by_key (thrust::device,
+		                            labelsD.begin(),
+			                    labelsD.end(),
+			                    dataCustomPtr,
+			                    keyDump.begin(),
+			                    d_centroidsCustomPtr,
+			                    thrust::equal_to<int> (),
+			                    thrust::plus<IteratorSizeHelper> ());
     int* keyDumpPtr = keyDump.data().get();
+    const int usedCentroids = ends_pair.first - keyDump.begin();
     thrust::device_vector<int> clusterSizes (keyDump);
     thrust::upper_bound (thrust::device,
 		         labelsD.begin(),
@@ -118,24 +121,77 @@ void kmean::Iteration ()
 			 keyDump.begin(),
 			 keyDump.end(),
 			 clusterSizes.begin());
+
+    VarianceCalculatorFunctor vcf (dataD.data().get(),
+		                   centroidsD.data().get(),
+				   centroidVariancesD.data().get(),
+				   keyDump.data().get(),
+				   clusterSizes.data().get(),
+				   dimension);
+    centroidVariancesD.assign(K, 0.0f);
+    thrust::for_each (thrust::device,
+		      pointCounter,
+		      pointCounter + K,
+		      vcf);
+    /*int maxCentroidIter = thrust::max_element(thrust::device,
+					      centroidVariancesD.begin(),
+					      centroidVariancesD.end ()) - centroidVariancesD.begin();*/
+    auto minMaxPair = thrust::minmax_element (thrust::device, 
+		                              centroidVariancesD.begin(),
+					      centroidVariancesD.begin() + usedCentroids);
+    int maxCentroidIter = minMaxPair.second - centroidVariancesD.begin();
+    int minCentroidIter = minMaxPair.first - centroidVariancesD.begin();
+    bool swapMinMax = (*(minMaxPair.second)/(*(minMaxPair.first)) > 10.0f);
+    CustomPtr shiftPoint = dataCustomPtr + clusterSizes[maxCentroidIter] -1;
     thrust::adjacent_difference (thrust::device,
 		                 clusterSizes.begin(),
 				 clusterSizes.end(),
 				 clusterSizes.begin());
-    
     CentroidDividerFunctor cdf (d_centroidsD.data().get(),
 		                clusterSizes.data().get(),
 				dimension);
     thrust::for_each (pointCounter,
 		      pointCounter + K,
 		      cdf);
+    if (iteration >= 5) 
     thrust::for_each (thrust::device,
 		      pointCounter,
 		      pointCounter + K,
-		      [centroidsCustomPtr, keyDumpPtr, d_centroidsCustomPtr]__device__ (int idx) 
-		      {if (keyDumpPtr[idx] >= idx) centroidsCustomPtr[keyDumpPtr[idx]] = 
-		       d_centroidsCustomPtr[idx];});
+		      [centroidsCustomPtr, 
+		       keyDumpPtr, 
+		       d_centroidsCustomPtr, 
+		       shiftPoint] __device__ (int idx)
+		       { 
+			  if (keyDumpPtr[idx] != idx && 
+			      (!idx || keyDumpPtr[idx - 1] == idx - 1))
+			  {centroidsCustomPtr[idx] = *shiftPoint;}
+			  else
+		          if (keyDumpPtr[idx] >= idx) 
+		              centroidsCustomPtr[keyDumpPtr[idx]] = 
+		              d_centroidsCustomPtr[idx];
+		      });
+    else
+    thrust::for_each (thrust::device,
+		      pointCounter,
+		      pointCounter + K,
+		      [centroidsCustomPtr, 
+		       keyDumpPtr, 
+		       d_centroidsCustomPtr] __device__ (int idx)
+		       { 
+		          if (keyDumpPtr[idx] >= idx) 
+		              centroidsCustomPtr[keyDumpPtr[idx]] = 
+		              d_centroidsCustomPtr[idx];
+		      });
+    if (iteration >= 5 && swapMinMax && usedCentroids == K) 
+    {
+	CustomPtr minPtr = centroidsCustomPtr + keyDump[minCentroidIter];
+	CC(cudaMemcpy (minPtr, shiftPoint, sizeof (float)*dimension, cudaMemcpyDeviceToDevice));
+	iteration = 0;
+    }
+    if (usedCentroids != K && iteration >= 5) iteration = 0;
+    iteration++;
 }
+
 
 void kmean::Process (const int max_iter)
 {
@@ -200,7 +256,7 @@ CentroidPointData DistancePointToCentroidFunctor::operator () (int centroidIndex
     for (int d = 0; d < dimension; d++)
     {
 	tempValue = (pointD[d] - centroidsD[centroidIndex*dimension + d]);
-	distance += tempValue*tempValue;
+	distance += sqrt(tempValue*tempValue);
     }
     CentroidPointData cpd = {distance, centroidIndex};
     return cpd;
@@ -225,6 +281,26 @@ IteratorSizeHelper& IteratorSizeHelper::operator= (IteratorSizeHelper b)
     }
     return *this;
 }
+__device__
+IteratorSizeHelper IteratorSizeHelper::operator- (const IteratorSizeHelper b) const
+{
+    IteratorSizeHelper res = {};
+    for (int d = 0; d < KMEAN_DIMENSION_DEFINED; d++)
+    {
+        res.data[d] = data[d] - b.data[d];
+    }
+    return res;
+}
+__device__
+float IteratorSizeHelper::NormSq () const
+{
+    float res = 0.0f;
+    for (int d = 0; d < KMEAN_DIMENSION_DEFINED; d++)
+    {
+        res += data[d]*data[d];
+    }
+    return res;
+}
 
 
 __host__ 
@@ -246,3 +322,51 @@ void CentroidDividerFunctor::operator () (int index)
     }
 
 }
+__device__
+SquaredNormFunctor::SquaredNormFunctor (float* dataD_,
+	                               float* centroidD_,
+				       const int dimension_) :
+    dataD     (dataD_),
+    centroidD (centroidD_),
+    dimension (dimension_)
+{}
+__device__
+float SquaredNormFunctor::operator () (int pointIndex)
+{
+    float value = dataD[pointIndex] - centroidD[pointIndex % dimension];
+    return value*value;
+}
+
+VarianceCalculatorFunctor::VarianceCalculatorFunctor (float* dataD_,
+                                                      float* centroidsD_,
+       		                                      float* centroidVariancesD_,
+						      int* centroidMappingD_,
+		                                      int* cumulativeCentroidSizesD_,
+						      const int dimension_) : 
+    dataD                    (dataD_),
+    centroidsD               (centroidsD_),
+    centroidVariancesD       (centroidVariancesD_),
+    centroidMappingD         (centroidMappingD_),
+    cumulativeCentroidSizesD (cumulativeCentroidSizesD_),
+    dimension                (dimension_)
+{}
+
+__device__
+void VarianceCalculatorFunctor::operator () (int centroidIndex)
+{
+    if (centroidMappingD[centroidIndex] < centroidIndex) return;
+    SquaredNormFunctor sqf (dataD, centroidsD + centroidMappingD[centroidIndex]*dimension, dimension);
+
+    thrust::counting_iterator<int> counter (0);
+    float variance =  
+        thrust::transform_reduce (thrust::device,
+			          counter + ((centroidIndex > 0) ? 
+				           cumulativeCentroidSizesD[centroidIndex - 1] : 
+				           0)*dimension,
+			          counter + cumulativeCentroidSizesD[centroidIndex]*dimension,
+				  sqf,
+				  0.0f,
+			          thrust::plus<float> ());
+    centroidVariancesD[centroidIndex] = variance;
+}
+
