@@ -22,7 +22,7 @@ class kmean
     int iteration;
 public:
     void Iteration ();
-    void CentroidInitialization ();
+    void CentroidInitialization (int seed);
 //public:
     kmean (const int seed,
 	   const int K,
@@ -33,6 +33,7 @@ public:
     void Process (const int max_iter);
 
     void Write (std::string filenamePoints, std::string filenameCentroids);
+    float Loss ();
 };
 
 struct CentroidPointData

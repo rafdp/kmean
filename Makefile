@@ -10,7 +10,7 @@ main: DatasetGeneration.o main.o HelperFunctions.o kmean.o
 DatasetGeneration.o: 
 	$(CU) $(CUFLAGS) -c DatasetGeneration.cu
 
-main.o: 
+main.o: main.cu 
 	$(CU) $(CUFLAGS) -c main.cu
 
 HelperFunctions.o: 

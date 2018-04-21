@@ -60,14 +60,14 @@ void kmean::Write (std::string filenamePoints, std::string filenameCentroids)
 }
 
 
-void kmean::CentroidInitialization ()
+void kmean::CentroidInitialization (int seed_)
 {
     curandState* states = nullptr;
     CC(cudaMalloc (&states, Npoints*dimension*sizeof (curandState)));
     bool singleClusterInitSetting = false;
     thrust::device_vector<float> centroidsInit (K*dimension, 0.5f);
     GenerateSingleCluster (states, 
-		           seed,
+		           seed_,
 		           dimension,
 			   centroidsInit.data().get (),
 			   0.5f/3.0f,
@@ -75,6 +75,7 @@ void kmean::CentroidInitialization ()
 			   centroidsD.data().get(),
 			   &singleClusterInitSetting);
     CC(cudaFree (states));
+    iteration = 0;
 }
 
 
@@ -195,10 +196,17 @@ void kmean::Iteration ()
 
 void kmean::Process (const int max_iter)
 {
-    CentroidInitialization();
+    CentroidInitialization(seed);
     for (int i = 0; i < max_iter; i++) Iteration ();
     //printf ("About to write\n");
     //Write ("test_data.txt", "test_centroids.txt");
+}
+
+float kmean::Loss ()
+{
+    return thrust::reduce (thrust::device,
+		           centroidVariancesD.begin (),
+			   centroidVariancesD.end ());
 }
 
 __device__
