@@ -10,7 +10,7 @@ static __global__ void setup_kernel (curandState * state,
 } 
 
 static __global__ void generate(curandState* globalState, 
-                                float* ptr, 
+                                float* data, 
                                 const float* mean, 
                                 const float dev, 
                                 const int maxI, 
@@ -21,8 +21,24 @@ static __global__ void generate(curandState* globalState,
     curandState localState = globalState[id];
     float value = curand_normal ( &localState );
     globalState[id] = localState; 
-    ptr[id] = value*dev + mean[id % dimension];
+    data[id] = value*dev + mean[id % dimension];
 }
+
+static __global__ void generateUniform(curandState* globalState, 
+                                       float* data, 
+                                       const float* boundingBox, 
+                                       const int maxI, 
+                                       const int dimension) 
+{
+    int id = blockIdx.x *blockDim.x + threadIdx.x;
+    if (id >= maxI) return;
+    int dim = id % dimension;
+    curandState localState = globalState[id];
+    float value = curand_uniform ( &localState );
+    globalState[id] = localState; 
+    data[id] = value*(boundingBox[dimension + dim] - boundingBox[dim]) + boundingBox[dim];
+}
+
 
 static __global__ void setLabels (int* labels)
 {
@@ -49,6 +65,28 @@ void GenerateSingleCluster (curandState* states,
         *initSetting = true;
     }
     generate <<<blocks, kernelsPerBlock>>> (states, data, mean, dev, Npoints*dimension, dimension);
+}
+
+void GenerateUniformBox (const int seed,
+                         const int dimension,
+			 float* boundingBox,
+			 const int Npoints,
+			 float* data)
+{
+    curandState* states = nullptr;
+    CC(cudaMalloc (&states, Npoints*dimension*sizeof (curandState)));
+    
+    
+    const int kernelsPerBlock = 512;
+    const int blocks = Npoints*dimension/kernelsPerBlock + 1;
+    setup_kernel <<<blocks, kernelsPerBlock>>> (states, seed, Npoints*dimension);
+    
+    generateUniform <<<blocks, kernelsPerBlock>>> (states, 
+		                                   data, boundingBox, 
+						   Npoints*dimension, 
+						   dimension);
+    
+    CC(cudaFree (states));
 }
 
 

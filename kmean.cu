@@ -5,26 +5,26 @@ kmean::kmean (const int seed_,
 	      const int K_,
 	      const int Npoints_,
 	      const int Nclusters_,
-	      const int dimension_) : 
+	      const int dimension_,
+	      thrust::device_vector<float>* dataD_) : 
     seed               (seed_),
     K                  (K_),
     Npoints            (Npoints_),
     Nclusters          (Nclusters_),
     dimension          (dimension_),
-    dataD              (Npoints*Nclusters*dimension, 0.0f),
-    initialLabelsD     (Npoints*Nclusters),
+    dataD              (dataD_),
     centroidsD         (K*dimension),
     centroidVariancesD (K),
     labelsD            (Npoints*Nclusters, -1),
     iteration          ()
 {
-    GenerateDatasetGaussian (seed, 
+    /*GenerateDatasetGaussian (seed, 
 		             Npoints, 
 		             Nclusters,
 			     dimension,
 			     dataD.data().get(),
 			     initialLabelsD.data().get(),
-			     true);
+			     true);*/
 
 }
 kmean::~kmean () {}
@@ -36,15 +36,14 @@ void kmean::Write (std::string filenamePoints, std::string filenameCentroids)
     FILE* f_centroids = fopen (filenameCentroids.c_str (), "w");
     if (!f_centroids) {fclose (f_points); return;}
 
-    thrust::host_vector<float> dataH (dataD);
+    thrust::host_vector<float> dataH (*dataD);
     thrust::host_vector<int> labelsH (labelsD);
-    thrust::host_vector<int> initialLabelsH (initialLabelsD);
     for (int i = 0; i < Npoints*Nclusters; i++)
     {
         for (int d = 0; d < dimension; d++)
             fprintf (f_points, "%f ", 
                      dataH[i*dimension + d]);
-        fprintf (f_points, "%d %d\n", labelsH [i], initialLabelsH [i]);
+        fprintf (f_points, "%d\n", labelsH [i]);
     }
 
     fclose (f_points);
@@ -81,7 +80,7 @@ void kmean::CentroidInitialization (int seed_)
 
 void kmean::Iteration ()
 {
-    LabelAssignmentFunctor laf (dataD.data().get(),
+    LabelAssignmentFunctor laf (dataD->data().get(),
 		                centroidsD.data().get(),
 			        labelsD.data().get(),
 			        dimension,
@@ -95,7 +94,7 @@ void kmean::Iteration ()
     typedef IteratorSizeHelper* CustomPtr;
     
     thrust::device_vector<float> d_centroidsD (centroidsD);
-    CustomPtr dataCustomPtr = reinterpret_cast<CustomPtr> (dataD.data().get());
+    CustomPtr dataCustomPtr = reinterpret_cast<CustomPtr> (dataD->data().get());
     CustomPtr centroidsCustomPtr = reinterpret_cast<CustomPtr> (centroidsD.data().get());
     CustomPtr d_centroidsCustomPtr = reinterpret_cast<CustomPtr> (d_centroidsD.data().get());
 
@@ -123,7 +122,7 @@ void kmean::Iteration ()
 			 keyDump.end(),
 			 clusterSizes.begin());
 
-    VarianceCalculatorFunctor vcf (dataD.data().get(),
+    VarianceCalculatorFunctor vcf (dataD->data().get(),
 		                   centroidsD.data().get(),
 				   centroidVariancesD.data().get(),
 				   keyDump.data().get(),
@@ -134,9 +133,7 @@ void kmean::Iteration ()
 		      pointCounter,
 		      pointCounter + K,
 		      vcf);
-    /*int maxCentroidIter = thrust::max_element(thrust::device,
-					      centroidVariancesD.begin(),
-					      centroidVariancesD.end ()) - centroidVariancesD.begin();*/
+    
     auto minMaxPair = thrust::minmax_element (thrust::device, 
 		                              centroidVariancesD.begin(),
 					      centroidVariancesD.begin() + usedCentroids);

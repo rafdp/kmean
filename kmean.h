@@ -11,8 +11,7 @@ class kmean
     const int Nclusters;
     const int dimension;
 
-    thrust::device_vector<float> dataD;
-    thrust::device_vector<int> initialLabelsD;
+    thrust::device_vector<float>* dataD;
 
     thrust::device_vector<float> centroidsD;
     thrust::device_vector<float> centroidVariancesD;
@@ -28,7 +27,8 @@ public:
 	   const int K,
            const int Npoints,
 	   const int Nclusters,
-	   const int dimension);
+	   const int dimension,
+	   thrust::device_vector<float>* dataD_);
     ~kmean ();
     void Process (const int max_iter);
 

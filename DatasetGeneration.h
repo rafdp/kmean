@@ -9,6 +9,12 @@ void GenerateSingleCluster (curandState* states,
                             float* data,
 			    bool* initSetting);
 
+void GenerateUniformBox (const int seed,
+		         const int dimension,
+			 float* boundingBox,
+			 const int Npoints,
+			 float* data);
+
 void GenerateDatasetGaussian (const int seed,
 		              const int Npoints, 
                               const int Nclusters, 
