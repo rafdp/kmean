@@ -39,14 +39,14 @@ static __global__ void generateUniform(curandState* globalState,
     data[id] = value*(boundingBox[dimension + dim] - boundingBox[dim]) + boundingBox[dim];
 }
 
-
+/*
 static __global__ void setLabels (int* labels)
 {
     int cluster = blockIdx.x;
     int point = threadIdx.x;
     labels[point + cluster*blockDim.x] = cluster;
 }
-
+*/
 
 void GenerateSingleCluster (curandState* states,
 	                    const int seed,	
@@ -102,7 +102,6 @@ void GenerateDatasetGaussian (const int seed,
     srand (seed);
     curandState* states = nullptr;
     CC(cudaMalloc (&states, Npoints*dimension*sizeof (curandState)));
-
     const float dev = (stddev < 0.001f) ? 0.2f/Nclusters : stddev;
     bool initSetting = false;
     for (int cluster = 0; cluster < Nclusters; cluster++)
@@ -119,12 +118,10 @@ void GenerateDatasetGaussian (const int seed,
                                data + cluster*Npoints*dimension,
 			       &initSetting);
     }
-    setLabels <<<Nclusters, Npoints>>> (labels);
     if (shuffle)
     {
         thrust::device_vector<float> swapPoint (dimension);
         float* swapPtr = swapPoint.data().get();
-        float swapLabel = 0.0f;
         for (int s = 0; s < Npoints*Nclusters; s++)
         {
             int x = rand () % Npoints*Nclusters;
@@ -144,20 +141,8 @@ void GenerateDatasetGaussian (const int seed,
                            swapPtr, 
                            sizeof(float)*dimension,
                            cudaMemcpyDeviceToDevice));
-            CC(cudaMemcpy (&swapLabel, 
-                           labels+x, 
-                           sizeof(float),
-                           cudaMemcpyDeviceToHost));
  
-            CC(cudaMemcpy (labels + x, 
-                           labels + y, 
-                           sizeof(float),
-                           cudaMemcpyDeviceToDevice));
 
-            CC(cudaMemcpy (labels + y, 
-                           &swapLabel, 
-                           sizeof(float),
-                           cudaMemcpyHostToDevice));
         }
     }
     CC(cudaFree (states));

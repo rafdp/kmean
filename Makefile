@@ -2,7 +2,7 @@
 .DEFAULT_GOAL := main
 
 CU = nvcc
-CUFLAGS = -Wno-deprecated-gpu-targets -std=c++11 --expt-extended-lambda -I. -rdc=true -arch=sm_61 
+CUFLAGS = -Wno-deprecated-gpu-targets -std=c++11 --expt-extended-lambda -I. -rdc=true -arch=sm_50 -O3 
 
 main: DatasetGeneration.o main.o HelperFunctions.o kmean.o KOptimizer.o
 	$(CU) $(CUFLAGS) -o $@ $^ -lcuda -lcudadevrt

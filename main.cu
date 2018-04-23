@@ -14,18 +14,29 @@ int main( int argc, char** argv)
     const int NTotal = Npoints*Nclusters;
     const int dimension = KMEAN_DIMENSION_DEFINED;
     const int MaxSeed = atoi (argv[1]);
-    printf ("HELLO\n"); 
-    for (int seed_ = 4; seed_ <= 3+MaxSeed; seed_++)
+    cudaFree (0);
+    __
+
+    FILE* f = fopen ("time.txt", "w");
+    if (!f) return 1;
+    for (int np = 100; np <= 100; np++)
     {
-        printf ("HELLO %d\n", seed_); 
-	KOptimizer kopt (seed_, Npoints, Nclusters, dimension);
-        printf ("HELLO %d\n", seed_); 
-	kopt.EvaluateGapStatistics ();
-        printf ("HELLO %d\n", seed_); 
-	kopt.EvaluateKMeans();
-        printf ("HELLO %d\n", seed_); 
-	kopt.WriteFileTest ();
+	/*for (int ni = 1; ni <= Niter; ni++)
+        {   printf ("ni = %d\n", ni);
+	    KOptimizer kopt (4, np, Nclusters, dimension, 10, ni);
+            __
+            float comp = kopt.TimeComparison ();
+	    fprintf (f, "%d %d %f\n", np, ni, comp);
+	}
+	    printf ("np = %d\n", np);*/
+	KOptimizer kopt (4, Npoints, Nclusters, dimension, 10, 1);
+	__
+        kopt.TimeComparison ();
+	//kopt.EvaluateGapStatistics ();
+	//kopt.EvaluateKMeans();
+	//kopt.WriteFileTest ();
     }
+    fclose (f);
     printf ("About to return\n");
     return 0;
 }

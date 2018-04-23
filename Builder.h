@@ -9,8 +9,9 @@
 #include <thrust/binary_search.h>
 #include <thrust/functional.h>
 #include <thrust/extrema.h>
+#include <unistd.h>
 #define CC(ans) { GPUAssert((ans), __FILE__, __LINE__); }
-
+#define __ CC(cudaPeekAtLastError())
 
 void GPUAssert(cudaError_t code, 
                       const char *file, 

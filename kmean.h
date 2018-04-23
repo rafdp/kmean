@@ -3,38 +3,6 @@
 #ifndef KMEAN_DIMENSION_DEFINED 
 #error "kmean dimension must be defined"
 #endif
-class kmean 
-{
-    const int seed;
-    const int K;
-    const int Npoints;
-    const int Nclusters;
-    const int dimension;
-
-    thrust::device_vector<float>* dataD;
-
-    thrust::device_vector<float> centroidsD;
-    thrust::device_vector<float> centroidVariancesD;
-
-    thrust::device_vector<int> labelsD;
-
-    int iteration;
-public:
-    void Iteration ();
-    void CentroidInitialization (int seed);
-//public:
-    kmean (const int seed,
-	   const int K,
-           const int Npoints,
-	   const int Nclusters,
-	   const int dimension,
-	   thrust::device_vector<float>* dataD_);
-    ~kmean ();
-    void Process (const int max_iter);
-
-    void Write (std::string filenamePoints, std::string filenameCentroids);
-    float Loss ();
-};
 
 struct CentroidPointData
 {
@@ -135,3 +103,44 @@ struct VarianceCalculatorFunctor
     void operator () (int centroidIndex);
 
 };
+
+
+class kmean 
+{
+    const int seed;
+    const int K;
+    const int Npoints;
+    const int Nclusters;
+    const int dimension;
+
+    float* dataD;
+
+    thrust::device_vector<float> centroidsD;
+    thrust::device_vector<float> centroidVariancesD;
+
+    thrust::device_vector<int> labelsD;
+
+    int iteration;
+    thrust::device_vector<float> d_centroidsD;
+    thrust::device_vector<int> keyDump;
+    thrust::device_vector<int> clusterSizes;
+    LabelAssignmentFunctor laf;
+    VarianceCalculatorFunctor vcf;
+    CentroidDividerFunctor cdf;
+public:
+    void Iteration ();
+    void CentroidInitialization (int seed);
+//public:
+    kmean (const int seed,
+	   const int K,
+           const int Npoints,
+	   const int Nclusters,
+	   const int dimension,
+	   float* dataD_);
+    ~kmean ();
+    void Process (const int max_iter);
+
+    void Write (std::string filenamePoints, std::string filenameCentroids);
+    float Loss ();
+};
+

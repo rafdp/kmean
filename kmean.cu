@@ -6,7 +6,7 @@ kmean::kmean (const int seed_,
 	      const int Npoints_,
 	      const int Nclusters_,
 	      const int dimension_,
-	      thrust::device_vector<float>* dataD_) : 
+	      float* dataD_) : 
     seed               (seed_),
     K                  (K_),
     Npoints            (Npoints_),
@@ -16,7 +16,24 @@ kmean::kmean (const int seed_,
     centroidsD         (K*dimension),
     centroidVariancesD (K),
     labelsD            (Npoints*Nclusters, -1),
-    iteration          ()
+    iteration          (),
+    d_centroidsD       (centroidsD),
+    keyDump            (K, 0),
+    clusterSizes       (K, 0),
+    laf                (dataD,
+		        centroidsD.data().get(),
+			labelsD.data().get(),
+			dimension,
+			K),
+    vcf                (dataD,
+		        centroidsD.data().get(),
+			centroidVariancesD.data().get(),
+			keyDump.data().get(),
+			clusterSizes.data().get(),
+			dimension),
+    cdf                (d_centroidsD.data().get(),
+		        clusterSizes.data().get(),
+			dimension)
 {
     /*GenerateDatasetGaussian (seed, 
 		             Npoints, 
@@ -25,7 +42,6 @@ kmean::kmean (const int seed_,
 			     dataD.data().get(),
 			     initialLabelsD.data().get(),
 			     true);*/
-
 }
 kmean::~kmean () {}
 
@@ -36,7 +52,7 @@ void kmean::Write (std::string filenamePoints, std::string filenameCentroids)
     FILE* f_centroids = fopen (filenameCentroids.c_str (), "w");
     if (!f_centroids) {fclose (f_points); return;}
 
-    thrust::host_vector<float> dataH (*dataD);
+    thrust::host_vector<float> dataH (dataD, dataD + Npoints*Nclusters*dimension);
     thrust::host_vector<int> labelsH (labelsD);
     for (int i = 0; i < Npoints*Nclusters; i++)
     {
@@ -78,32 +94,41 @@ void kmean::CentroidInitialization (int seed_)
 }
 
 
+#define TIME_PROFILE(x) x
 void kmean::Iteration ()
 {
-    LabelAssignmentFunctor laf (dataD->data().get(),
+  /*  LabelAssignmentFunctor laf (dataD->data().get(),
 		                centroidsD.data().get(),
 			        labelsD.data().get(),
 			        dimension,
-			        K);
+			        K);*/
+    TIME_PROFILE(timespec ts[20] = {};)
+    TIME_PROFILE(int ts_index = 0;)
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
+
     thrust::counting_iterator<int> pointCounter (0);
     thrust::for_each (thrust::device,
 		      pointCounter,
 		      pointCounter + Npoints*Nclusters,
 		      laf);
 
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
     typedef IteratorSizeHelper* CustomPtr;
     
-    thrust::device_vector<float> d_centroidsD (centroidsD);
-    CustomPtr dataCustomPtr = reinterpret_cast<CustomPtr> (dataD->data().get());
+    CustomPtr dataCustomPtr = reinterpret_cast<CustomPtr> (dataD);
     CustomPtr centroidsCustomPtr = reinterpret_cast<CustomPtr> (centroidsD.data().get());
     CustomPtr d_centroidsCustomPtr = reinterpret_cast<CustomPtr> (d_centroidsD.data().get());
-
+    //printf ("ABOUT TO SORT\n");
     thrust::sort_by_key (thrust::device,
 		         labelsD.begin(),
 			 labelsD.end(),
 			 dataCustomPtr);
-
-    thrust::device_vector<int> keyDump (K, 0);
+    //printf ("SORTED\n");
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
+    keyDump.assign (K, 0);
     auto ends_pair = thrust::reduce_by_key (thrust::device,
 		                            labelsD.begin(),
 			                    labelsD.end(),
@@ -112,27 +137,36 @@ void kmean::Iteration ()
 			                    d_centroidsCustomPtr,
 			                    thrust::equal_to<int> (),
 			                    thrust::plus<IteratorSizeHelper> ());
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
     int* keyDumpPtr = keyDump.data().get();
     const int usedCentroids = ends_pair.first - keyDump.begin();
-    thrust::device_vector<int> clusterSizes (keyDump);
+    ///*thrust::device_vector<int>*/ clusterSizes.assign (keyDump.begin(), keyDump.end());
+    //printf ("clusterSize = %d\n", clusterSizes.size());
     thrust::upper_bound (thrust::device,
 		         labelsD.begin(),
 			 labelsD.end(),
 			 keyDump.begin(),
 			 keyDump.end(),
 			 clusterSizes.begin());
-
-    VarianceCalculatorFunctor vcf (dataD->data().get(),
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
+    
+    //printf ("keyDump = %d\n", keyDump.size());
+/*    VarianceCalculatorFunctor vcf (dataD->data().get(),
 		                   centroidsD.data().get(),
 				   centroidVariancesD.data().get(),
 				   keyDump.data().get(),
 				   clusterSizes.data().get(),
-				   dimension);
+				   dimension);*/
     centroidVariancesD.assign(K, 0.0f);
     thrust::for_each (thrust::device,
 		      pointCounter,
-		      pointCounter + K,
+		      pointCounter + usedCentroids,
 		      vcf);
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
+    //printf ("usedCentroids = %d\n", usedCentroids);
     
     auto minMaxPair = thrust::minmax_element (thrust::device, 
 		                              centroidVariancesD.begin(),
@@ -140,21 +174,28 @@ void kmean::Iteration ()
     int maxCentroidIter = minMaxPair.second - centroidVariancesD.begin();
     int minCentroidIter = minMaxPair.first - centroidVariancesD.begin();
     bool swapMinMax = (*(minMaxPair.second)/(*(minMaxPair.first)) > 10.0f);
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
+    //printf ("maxCentroidIter = %d\n", maxCentroidIter);
     CustomPtr shiftPoint = dataCustomPtr + clusterSizes[maxCentroidIter] -1;
     thrust::adjacent_difference (thrust::device,
 		                 clusterSizes.begin(),
 				 clusterSizes.end(),
 				 clusterSizes.begin());
-    CentroidDividerFunctor cdf (d_centroidsD.data().get(),
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
+    /*CentroidDividerFunctor cdf (d_centroidsD.data().get(),
 		                clusterSizes.data().get(),
-				dimension);
+				dimension);*/
     thrust::for_each (pointCounter,
-		      pointCounter + K,
+		      pointCounter + usedCentroids,
 		      cdf);
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
     if (iteration >= 5) 
     thrust::for_each (thrust::device,
 		      pointCounter,
-		      pointCounter + K,
+		      pointCounter + usedCentroids,
 		      [centroidsCustomPtr, 
 		       keyDumpPtr, 
 		       d_centroidsCustomPtr, 
@@ -171,7 +212,7 @@ void kmean::Iteration ()
     else
     thrust::for_each (thrust::device,
 		      pointCounter,
-		      pointCounter + K,
+		      pointCounter + usedCentroids,
 		      [centroidsCustomPtr, 
 		       keyDumpPtr, 
 		       d_centroidsCustomPtr] __device__ (int idx)
@@ -180,6 +221,8 @@ void kmean::Iteration ()
 		              centroidsCustomPtr[keyDumpPtr[idx]] = 
 		              d_centroidsCustomPtr[idx];
 		      });
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
     if (iteration >= 5 && swapMinMax && usedCentroids == K) 
     {
 	CustomPtr minPtr = centroidsCustomPtr + keyDump[minCentroidIter];
@@ -188,6 +231,12 @@ void kmean::Iteration ()
     }
     if (usedCentroids != K && iteration >= 5) iteration = 0;
     iteration++;
+    TIME_PROFILE(cudaDeviceSynchronize ();)
+    TIME_PROFILE(clock_gettime(CLOCK_REALTIME, ts + ts_index); ts_index++;)//
+    TIME_PROFILE(for (int i = 1; i < ts_index; i++)
+	              printf ("%d->%d took %f mks\n", i - 1, i, 
+                                ((ts[i].tv_sec - ts[i-1].tv_sec)*1000000000.0f + 
+                                  ts[i].tv_nsec - ts[i-1].tv_nsec)/1000.0f);)
 }
 
 
@@ -236,14 +285,31 @@ void LabelAssignmentFunctor::operator () (int pointIndex)
     DistancePointToCentroidFunctor dptcf (dataD + pointIndex*dimension,
 		                          centroidsD,
 					  dimension);
-    CentroidPointData result = {100.0f, K + 1};
-    result = thrust::transform_reduce (thrust::device, 
+    //CentroidPointData result = {100.0f, K + 1};
+    int foundCentroid = 0;
+    float dist = 0.0f;
+    float val = 0.0f;
+    float minDist = 0.0f;
+    for (int k = 0; k < K; k++)
+    {
+	for (int d = 0; d < dimension; d++)
+	{
+	    val = (dataD[pointIndex*dimension + d] - centroidsD[k*dimension + d]);
+	    dist += val*val;
+        }
+        if (!k || (minDist < dist))
+	{
+            foundCentroid = k;
+	    minDist = dist;
+	}
+    }
+    /*result = thrust::transform_reduce (thrust::device, 
 		                       centroidCounter, 
 			               centroidCounter + K,
 			               dptcf,
 			               result,
-			               minimizer);
-    labelsD[pointIndex] = result.centroid;
+			               minimizer);*/
+    labelsD[pointIndex] = foundCentroid/*result.centroid*/;
 }
 __device__
 DistancePointToCentroidFunctor::DistancePointToCentroidFunctor (float* pointD_,
