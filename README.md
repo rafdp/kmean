@@ -10,3 +10,6 @@ BIC and AIC criteria for optimal number of centroids, the method of [gap statist
 was used.
 Being not time optimal, as it needs the creation of a uniform distribution over the same area and rerunning kmeans on it multiple times, 
 it still gives the best results and is intuitive, opposed to the tested criteria.
+
+
+[Presentation](https://www.dropbox.com/s/dy0gh3gu3p2y2o4/kmeans.pdf?dl=0)
